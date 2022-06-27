@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, List, Optional
 
 from .callbacks import DEFAULT_CALLBACK
 from .implementations.local import LocalFileSystem
+from .links import link, test_link
 from .utils import as_atomic
 
 if TYPE_CHECKING:
@@ -12,20 +13,6 @@ if TYPE_CHECKING:
     from .callbacks import Callback
 
 logger = logging.getLogger(__name__)
-
-
-def _link(
-    link: "str",
-    from_fs: "FileSystem",
-    from_path: "AnyFSPath",
-    to_fs: "FileSystem",
-    to_path: "AnyFSPath",
-) -> None:
-    if not isinstance(from_fs, type(to_fs)):
-        raise OSError(errno.EXDEV, "can't link across filesystems")
-
-    func = getattr(to_fs, link)
-    func(from_path, to_path)
 
 
 def copy(
@@ -59,13 +46,13 @@ def _try_links(
 ) -> None:
     error = None
     while links:
-        link = links[0]
+        link_type = links[0]
 
-        if link == "copy":
+        if link_type == "copy":
             return copy(from_fs, from_path, to_fs, to_path, callback=callback)
 
         try:
-            return _link(link, from_fs, from_path, to_fs, to_path)
+            return link(link_type, from_fs, from_path, to_fs, to_path)
         except OSError as exc:
             if exc.errno not in [errno.EPERM, errno.ENOTSUP, errno.EXDEV]:
                 raise
@@ -116,28 +103,6 @@ def transfer(
         raise
 
 
-def _test_link(
-    link: "str",
-    from_fs: "FileSystem",
-    from_file: "AnyFSPath",
-    to_fs: "FileSystem",
-    to_file: "AnyFSPath",
-) -> bool:
-    try:
-        _try_links([link], from_fs, from_file, to_fs, to_file)
-    except OSError:
-        logger.debug("", exc_info=True)
-        return False
-
-    try:
-        _is_link_func = getattr(to_fs, f"is_{link}")
-        return _is_link_func(to_file)
-    except AttributeError:
-        pass
-
-    return True
-
-
 def test_links(
     links: List["str"],
     from_fs: "FileSystem",
@@ -160,10 +125,10 @@ def test_links(
 
     ret = []
     try:
-        for link in links:
+        for link_type in links:
             try:
-                if _test_link(link, from_fs, from_file, to_fs, to_file):
-                    ret.append(link)
+                if test_link(link_type, from_fs, from_file, to_fs, to_file):
+                    ret.append(link_type)
             finally:
                 to_fs.remove(to_file)
     finally:
